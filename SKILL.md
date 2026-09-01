@@ -898,6 +898,8 @@ generate_word_report() 生成报告
 
 本skill采用多位一体约束模式（规范层+执行层+验证层+参考层+史实层），修改时需同步更新以下文件，禁止只改一边。
 
+> **回归校验（强制）**：凡修改本文件中的契约/公式/列宽/禁用词等规范条目，修改后必须重跑 `grade_checker.py` 全量校验（对 `grading_data_*.json` 逐份跑 `GradeChecker().run_all_checks`），确认 **8/8 全部 0 error** 再提交。这能挡住「规范↔代码漂移」类裂缝——例如 SKILL.md 写 `points+language`、代码却 `points+language+卷面` 这种同文件内 A 改 B 漏的情况（2026-09-01 审计即由此发现）。GradeChecker 只校验数据、不校验规范与代码是否一致，故此步需人工执行，不可省略。
+
 #### 修改对应表
 
 | 修改内容 | 需同步修改的文件 | 修改位置 |
