@@ -9,6 +9,7 @@ import sys
 import json
 import argparse
 from datetime import datetime
+import copy
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -255,6 +256,7 @@ class EssayGrader:
 
     def set_grading_result(self, result):
         """设置完整批改结果"""
+        self.data = copy.deepcopy(result)  # 保留原始数据，供 run_all_checks 委托 GradeChecker 时回传
         self.sections = result.get('sections', [])
         self.language_breakdown = result.get('language_breakdown', {})
         self.issues = result.get('issues', [])
@@ -265,7 +267,8 @@ class EssayGrader:
         # 从表格数据读取分数，确保一致性
         self.scores['points'] = sum(s.get('score', 0) for s in self.sections)
         self.scores['language'] = sum(v.get('score', 0) for v in self.language_breakdown.values())
-        self.scores['卷面'] = result.get('卷面', self.language_breakdown.get('neatness', {}).get('score', 0))
+        # 卷面已含于论述组织六维（neatness），不再单独计入，避免与六维中的 neatness 重复计算
+        self.scores['卷面'] = 0
 
         # 强制同步diagnosis分数
         total = self.scores['points'] + self.scores['language']
@@ -274,57 +277,41 @@ class EssayGrader:
             # 替换diagnosis中的分数为计算值
             self.diagnosis = re.sub(r'\d+\.?\d*/40', f'{total}/40', self.diagnosis)
 
-        # 验证语言组织评分不超过满分
-        lang_total = self.scores['language'] + self.scores['卷面']
+        # 验证论述组织评分不超过满分
+        lang_total = self.scores['language']
         if lang_total > 10.01:
             ratio = 10.0 / lang_total
             self.scores['language'] = round(self.scores['language'] * ratio, 1)
-            self.scores['卷面'] = round(self.scores['卷面'] * ratio, 1)
             # 重新同步diagnosis
             total = self.scores['points'] + self.scores['language']
             self.diagnosis = re.sub(r'\d+\.?\d*/40', f'{total}/40', self.diagnosis)
 
     def run_all_checks(self):
-        """运行所有检查，返回(errors, warnings)"""
-        all_errors = []
-        all_warnings = []
-
-        # 检查参考答案
-        ref_errors, ref_warnings = check_reference_answer(self.reference)
-        all_errors.extend(ref_errors)
-        all_warnings.extend(ref_warnings)
-
-        # 检查点评格式和四要素
-        for section in self.sections:
-            for point in section.get('points', []):
-                comment = point[6] if len(point) > 6 else ''
-                point_name = point[2] if len(point) > 2 else '未知'
-                fmt_errors = check_comment_format(comment, point_name)
-                elem_warnings = check_comment_elements(comment, point_name)
-                all_errors.extend(fmt_errors)
-                all_warnings.extend(elem_warnings)
-
-        # 检查分数一致性
-        score_errors = check_score_consistency(
-            self.sections, self.scores['language'] + self.scores['卷面'], self.scores['points']
-        )
-        all_errors.extend(score_errors)
-
-        # 检查学生作答列
-        student_texts = []
-        for section in self.sections:
-            for point in section.get('points', []):
-                if len(point) > 2:
-                    student_texts.append(point[2])
-        ans_errors = check_student_answer_column(student_texts)
-        all_errors.extend(ans_errors)
-
-        # 检查整体点评
-        diag_errors, diag_warnings = check_diagnosis_format(self.diagnosis)
-        all_errors.extend(diag_errors)
-        all_warnings.extend(diag_warnings)
-
-        return all_errors, all_warnings
+        """委托 GradeChecker 做完整校验，返回 (errors, warnings)。
+        生成层与验证层共用同一套检查规则，杜绝'能出 Word 却未通过校验'的裂缝。"""
+        try:
+            from grade_checker import GradeChecker
+        except ImportError:
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from grade_checker import GradeChecker
+        # 用当前实际生效的属性重组 grading_data，确保与渲染一致
+        gd = {
+            'question': self.question or '',
+            'student_answer': self.student_answer or '',
+            'reference': self.reference or '',
+            'sections': self.sections,
+            'language_breakdown': self.language_breakdown,
+            'language_score': self.scores['language'],
+            'points_score': self.scores['points'],
+            'diagnosis': self.diagnosis or '',
+            'issues': self.issues,
+            'suggestions': self.suggestions,
+            'three_passes': (self.data or {}).get('three_passes'),
+        }
+        checker = GradeChecker()
+        report = checker.run_all_checks(gd)
+        return report['errors'], report['warnings']
 
     def generate_word_report(self, output_path):
         """生成Word版批改报告"""
@@ -367,7 +354,7 @@ class EssayGrader:
                     run.bold = True
         for i, row in enumerate([
             ['要点踩点', str(self.scores['points']), '30'],
-            ['论述组织（含卷面）', str(self.scores['language'] + self.scores['卷面']), '10'],
+            ['论述组织（含卷面）', str(self.scores['language']), '10'],
             ['合计', f'{total_score}/40', '']
         ]):
             for j, cell_text in enumerate(row):
