@@ -11,8 +11,9 @@ import argparse
 from datetime import datetime
 import copy
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 
 
@@ -42,6 +43,17 @@ def load_config():
             except Exception:
                 pass
     return cfg
+
+
+def _set_table_column_widths(table, widths_cm):
+    """固定表格各列宽度（厘米），避免点评等长文本列被挤压、阅读困难。"""
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+    table.allow_autofit = False
+    for row in table.rows:
+        for idx, w in enumerate(widths_cm):
+            if idx < len(row.cells):
+                row.cells[idx].width = Cm(w)
 
 
 def resolve_output_path(input_json_path, config, cli_output=None):
@@ -262,6 +274,7 @@ class EssayGrader:
         self.issues = result.get('issues', [])
         self.suggestions = result.get('suggestions', [])
         self.reference = result.get('reference', '')
+        self.student_answer = result.get('student_answer', '') or ''
         self.diagnosis = result.get('diagnosis', '') or None
 
         # 从表格数据读取分数，确保一致性
@@ -304,6 +317,7 @@ class EssayGrader:
             'language_breakdown': self.language_breakdown,
             'language_score': self.scores['language'],
             'points_score': self.scores['points'],
+            'total_score': (self.data or {}).get('total_score'),
             'diagnosis': self.diagnosis or '',
             'issues': self.issues,
             'suggestions': self.suggestions,
@@ -346,6 +360,7 @@ class EssayGrader:
         total_score = self.scores['points'] + self.scores['language'] + self.scores['卷面']
         table = doc.add_table(rows=4, cols=3)
         table.style = 'Light Grid Accent 1'
+        _set_table_column_widths(table, [4.0, 2.5, 2.0])
         for i, h in enumerate(['维度', '得分', '满分']):
             cell = table.rows[0].cells[i]
             cell.text = h
@@ -363,13 +378,16 @@ class EssayGrader:
 
         # 学生答案
         doc.add_heading('【学生答案】', level=1)
-        if isinstance(self.student_answer, str):
-            for para_text in self.student_answer.split('\n\n'):
-                para_text = para_text.strip()
-                if para_text:
-                    self._add_answer_paragraph(doc, para_text)
+        if self.student_answer:
+            if isinstance(self.student_answer, str):
+                for para_text in self.student_answer.split('\n\n'):
+                    para_text = para_text.strip()
+                    if para_text:
+                        self._add_answer_paragraph(doc, para_text)
+            else:
+                self._add_answer_paragraph(doc, str(self.student_answer))
         else:
-            self._add_answer_paragraph(doc, str(self.student_answer))
+            doc.add_paragraph('未提供学生答案')
         if self.red_keywords:
             note_p = doc.add_paragraph()
             note_run = note_p.add_run("注：标红处为史实错误，括号内为正确表述。")
@@ -388,6 +406,8 @@ class EssayGrader:
             n_rows = len(section['points']) + 1
             table = doc.add_table(rows=n_rows, cols=4)
             table.style = 'Light Grid Accent 1'
+            # 列宽（厘米）：踩分点名称 / 学生作答 / 得分满分 / 点评 —— 点评列最宽，避免长文本被挤压
+            _set_table_column_widths(table, [2.8, 3.0, 1.2, 8.5])
             for i, h in enumerate(headers):
                 cell = table.rows[0].cells[i]
                 cell.text = h
@@ -431,6 +451,8 @@ class EssayGrader:
         n_rows = len(table_data)
         table = doc.add_table(rows=n_rows, cols=3)
         table.style = 'Light Grid Accent 1'
+        # 列宽（厘米）：维度 / 得分满分 / 评语 —— 评语列最宽
+        _set_table_column_widths(table, [2.5, 1.5, 11.5])
         for i, row_data in enumerate(table_data):
             for j, cell_text in enumerate(row_data):
                 cell = table.rows[i].cells[j]

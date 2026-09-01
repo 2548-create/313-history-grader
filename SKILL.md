@@ -724,6 +724,7 @@ python scripts/generate_word.py <输入.json> [-o 输出.docx] [--config 自定�
   "language_breakdown": { "六维度论述组织评分，见下" },
   "language_score": 10.0,
   "points_score": 30.0,
+  "total_score": 40.0,
   "diagnosis": "整体点评文本（必须是字符串，不是字典）",
   "issues": [ {"type":"亮点","problem":"..."}, {"type":"不足","problem":"...","fix":"正确表述"} ],
   "suggestions": [ {"type":"改进方向","problem":"..."} ],
@@ -732,7 +733,14 @@ python scripts/generate_word.py <输入.json> [-o 输出.docx] [--config 自定�
 }
 ```
 - `language_score` = `language_breakdown` 六维 `score` 之和（满分10）；`points_score` = 各 `section.score` 之和（满分30）。二者校验器会核对，缺失按 0 算并报错。
+- `total_score` = `points_score` + `language_score`（满分40）。**校验器强制核对**：若与分项之和不符，直接报 error 并阻断生成（防手算笔误，如写成 20.5 实为 22）。渲染层总分概览也以此为准重算，不依赖该字段。
+- `student_answer` **必填**（顶层字符串字段）。`generate_word.py` 的 `set_grading_result` 会读取它渲染到【学生答案】区；若缺失/为 None，渲染层兜底显示"未提供学生答案"（绝不会再出现字面量 `None`）。AI 生成 JSON 时切勿遗漏此字段。
 - `issues` 推荐提供（含至少一个 `type:"亮点"`），否则校验器提示"亮点为空"。`suggestions` / `red_keywords` / `three_passes` 可选。
+
+**渲染层表格列宽（固定，不随内容伸缩）：**
+- 【踩分点对照表】四列宽度（厘米）：踩分点名称 2.8 / 学生作答 3.0 / 得分满分 1.2 / **点评 8.5（最宽）**。
+- 【论述组织评分】三列宽度（厘米）：维度 2.5 / 得分满分 1.5 / **评语 11.5（最宽）**。
+- 原因：点评/评语文本最长，固定最宽列避免被挤压成一行几字、阅读困难。如需调整，改 `generate_word.py` 中 `_set_table_column_widths` 的传参。
 
 **板块（sections 元素）：**
 ```json

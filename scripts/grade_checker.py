@@ -563,7 +563,7 @@ class GradeChecker:
                     self.warnings.append(f"不足中可能包含了正确表述：{problem[:50]}...")
 
     # ==================== 分数一致性检查 ====================
-    def check_score_consistency(self, sections, language_score, points_score, diagnosis_text=''):
+    def check_score_consistency(self, sections, language_score, points_score, diagnosis_text='', total_score=None):
         """检查分数一致性：板块得分、满分、总分"""
         total_max = sum(s.get('max_score', 0) for s in sections)
         total_student = sum(s.get('score', 0) for s in sections)
@@ -577,6 +577,13 @@ class GradeChecker:
         total = points_score + lang_total
         if total > 40.01:
             self.errors.append(f"总分{total}超过满分40分")
+        # 检查顶层 total_score 字段是否与分项之和一致（防 AI 手算笔误，如 20.5 vs 22）
+        if total_score is not None:
+            try:
+                if abs(float(total_score) - total) > 0.01:
+                    self.errors.append(f"顶层total_score({total_score})与分项之和({total})不一致")
+            except (TypeError, ValueError):
+                self.errors.append(f"顶层total_score字段非数值：{total_score}")
         # 检查诊断文本中的分数是否与总分一致
         if diagnosis_text:
             matches = re.findall(r'(\d+\.?\d*)/40', diagnosis_text)
@@ -771,7 +778,7 @@ class GradeChecker:
         self.check_score_sync(sections, language_breakdown, language_score, points_score, diagnosis)
 
         # 分数一致性
-        self.check_score_consistency(sections, language_score, points_score, diagnosis)
+        self.check_score_consistency(sections, language_score, points_score, diagnosis, grading_data.get('total_score'))
 
         return self.report()
 
