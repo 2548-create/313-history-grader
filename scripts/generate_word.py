@@ -10,6 +10,32 @@ import json
 import argparse
 from datetime import datetime
 import copy
+
+
+# ==================== 环境自举（小白友好）====================
+def _ensure_docx():
+    """确保 python-docx 可用；缺失时自动安装到当前解释器，避免 ModuleNotFoundError 硬崩。"""
+    try:
+        import docx  # noqa: F401
+        return
+    except ImportError:
+        import subprocess
+        print("[环境准备] 未检测到 python-docx，正在自动安装（仅此一次）...", flush=True)
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "python-docx>=1.0", "--quiet"]
+            )
+        except Exception:
+            sys.stderr.write(
+                "自动安装 python-docx 失败（可能无网络）。请手动执行：\n"
+                "  %s -m pip install python-docx\n" % sys.executable
+            )
+            raise
+
+
+_ensure_docx()
+
+
 from docx import Document
 from docx.shared import Pt, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH

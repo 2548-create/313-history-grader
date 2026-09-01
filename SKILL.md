@@ -66,6 +66,16 @@ description: >
 
 ---
 
+## 环境准备（AI 执行 · 小白友好）
+
+本 skill 依赖 `python-docx`（仅 `generate_word.py` 用到）。**AI 在跑任何脚本前必须先完成环境准备**，让完全不懂 Python 的小白也能直接用，无需手动装依赖。
+
+1. 确认解释器为 Python ≥ 3.10（agent 的托管/隔离 Python 即可，无需用户系统 Python）。
+2. 试 `import docx`；若失败，执行 `pip install -r requirements.txt`（装进当前解释器环境，隔离、不污染用户系统）。
+3. 该步骤**一次性**，装完后续运行跳过；`generate_word.py` 顶部另有 `_ensure_docx()` 兜底——即使本步被漏跑，脚本也会自行检测并自动安装，绝不会以 `ModuleNotFoundError` 硬崩。
+
+> 依赖清单见 `requirements.txt`（当前仅 `python-docx>=1.0`）。**凡增删 Python 依赖，必须同步：修改 `requirements.txt` + 本段说明 + `generate_word.py` 的 `_ensure_docx()`**，禁止只改一处。
+
 ## AI用语规范（全局适用）
 
 ### 一、禁用词汇总
@@ -913,6 +923,7 @@ generate_word_report() 生成报告
 | 参考答案英文残留检测 | generate_word.py + grade_checker.py | check_reference_answer() |
 | 踩分点维度列校验 | grade_checker.py | check_scoring_points() |
 | 踩分点严格度校验 | SKILL.md + grade_checker.py | check_scoring_detail_level()（新增） |
+| 新增/修改 Python 依赖 | requirements.txt + SKILL.md 环境准备段 + generate_word.py `_ensure_docx()` | 依赖安装与自举 |
 | 数值一致性校验 | SKILL.md + grade_checker.py + generate_word.py | check_score_sync()（新增） |
 | 踩分点列格式校验 | SKILL.md + grade_checker.py | check_scoring_point_name()（新增） |
 | 点评语言规范校验 | SKILL.md + grade_checker.py | check_comment_language()（新增） |
