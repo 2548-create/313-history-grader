@@ -101,35 +101,6 @@ def check_ai_voice(text):
     return issues
 
 
-# ==================== 分数校验 ====================
-def check_score_consistency(sections, language_score, points_score):
-    """检查分数一致性"""
-    errors = []
-    for section in sections:
-        section_name = section.get('name', '未知板块')
-        max_score = section.get('max_score', 0)
-        score = section.get('score', 0)
-        points = section.get('points', [])
-
-        points_total = sum(float(p[3]) for p in points)
-        if points_total != max_score:
-            errors.append(f"板块'{section_name}'的踩分点分值之和({points_total})不等于板块满分({max_score})")
-
-        student_total = sum(float(p[5]) for p in points)
-        if student_total != score:
-            errors.append(f"板块'{section_name}'的学生得分之和({student_total})不等于板块得分({score})")
-
-    lang_total = language_score
-    if lang_total > 10.01:
-        errors.append(f"论述组织+卷面得分 {lang_total} 超过满分10分")
-
-    total = points_score + lang_total
-    if total > 40.01:
-        errors.append(f"总分{total}超过满分40分")
-
-    return errors
-
-
 # ==================== 点评格式校验 ====================
 def check_comment_format(comment_text, point_name):
     """检查点评格式"""
@@ -357,7 +328,7 @@ class EssayGrader:
 
         # 总分概览
         doc.add_heading('【总分概览】', level=1)
-        total_score = self.scores['points'] + self.scores['language'] + self.scores['卷面']
+        total_score = self.scores['points'] + self.scores['language']
         table = doc.add_table(rows=4, cols=3)
         table.style = 'Light Grid Accent 1'
         _set_table_column_widths(table, [4.0, 2.5, 2.0])

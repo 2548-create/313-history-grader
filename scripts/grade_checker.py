@@ -704,10 +704,40 @@ class GradeChecker:
         if len(covered) == 0:
             self.warnings.append(f"影响板块维度套用可能不合理，已覆盖0/{len(selected_dims)}个维度，建议改用题目逻辑检查")
 
+    def check_contract_structure(self, grading_data):
+        """校验 JSON 数据契约结构（SKILL.md『JSON 数据契约』章）。
+        规范层承诺'违反契约→校验器报错'，此前校验器仅防御性消费、静默兜底，
+        此处补齐显式结构校验，使承诺兑现。须在一切消费逻辑之前调用。"""
+        # 顶层必填字段：student_answer（SKILL.md 737 必填）
+        student_answer = grading_data.get('student_answer', '')
+        if not isinstance(student_answer, str) or not student_answer.strip():
+            self.errors.append("顶层字段 'student_answer' 必填且须为非空字符串（SKILL.md JSON 数据契约）")
+
+        # 踩分点必须为 7 元素数组 [名称,关键词,学生作答,满分,维度,得分,点评]
+        for si, section in enumerate(grading_data.get('sections', [])):
+            sec_name = section.get('name', f'板块{si+1}')
+            for pi, point in enumerate(section.get('points', [])):
+                if not isinstance(point, (list, tuple)) or len(point) != 7:
+                    actual = len(point) if isinstance(point, (list, tuple)) else '非数组'
+                    self.errors.append(
+                        f"板块'{sec_name}'第{pi+1}个踩分点应为 7 元素数组 "
+                        f"[名称,关键词,学生作答,满分,维度,得分,点评]，实际长度 {actual}"
+                    )
+
+        # language_breakdown 必须含全部 6 个维度键（SKILL.md 六维契约）
+        required_dims = ['structure', 'logic', 'argument', 'language', 'history_view', 'neatness']
+        language_breakdown = grading_data.get('language_breakdown', {})
+        for dim in required_dims:
+            if dim not in language_breakdown:
+                self.errors.append(f"language_breakdown 缺少必填维度键 '{dim}'（SKILL.md JSON 数据契约六维）")
+
     def run_all_checks(self, grading_data):
         """运行所有检查"""
         self.errors = []
         self.warnings = []
+
+        # 契约结构校验（须在所有消费逻辑之前，违反契约直接报错阻断）
+        self.check_contract_structure(grading_data)
 
         sections = grading_data.get('sections', [])
         language_breakdown = grading_data.get('language_breakdown', {})
