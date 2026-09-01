@@ -22,13 +22,16 @@ from typing import List, Dict, Any, Tuple, Optional
 
 # ==================== 题目识别 ====================
 
-def extract_question_triple(question: str) -> Tuple[str, str, str]:
+def extract_question_triple(question: str) -> Tuple[str, str, List[str]]:
     """提取题目三元组：时间范围 + 核心对象 + 设问类型"""
     # 时间范围
     time_patterns = [
         r'(\d+世纪.*?至\d+世纪)',
         r'(\d+年至\d+年)',
         r'(\d+世纪.*?到\d+世纪)',
+        r'(\d+世纪中期)',
+        r'(\d+世纪初)',
+        r'(\d+世纪末)',
         r'(西汉|东汉|唐朝|宋朝|明朝|清朝|中世纪|近代|现代)',
     ]
     time_range = ''
@@ -43,7 +46,7 @@ def extract_question_triple(question: str) -> Tuple[str, str, str]:
     question_clean = re.sub(r'问题|影响|原因|背景|过程|演变|措施|特点', '', question_clean)
     # 保留时间、地点、主体关键词
     obj_patterns = [
-        r'(日本|德国|中国|法国|英国|罗马|西欧|欧洲|美国|俄国|苏联)',
+        r'(日本|德国|中国|法国|英国|罗马|西欧|欧洲|美国|俄国|苏联|明朝|唐朝|宋朝|汉朝|清朝|西汉|东汉|元朝|秦朝|周朝|商朝)',
         r'(诸侯王国|幕府体制|郡县制|封建制度|殖民体系)',
         r'([^，、的]{2,10}(问题|体制|制度|改革|运动|战争|革命|时期))',
     ]
@@ -54,7 +57,7 @@ def extract_question_triple(question: str) -> Tuple[str, str, str]:
             obj = m.group(1).strip()
             break
 
-    # 设问类型
+    # 设问类型（可能多问，返回集合而非单值，避免双子问漏判）
     question_types = {
         '演变': r'演变|发展|变化',
         '原因': r'原因|因素|背景',
@@ -63,13 +66,12 @@ def extract_question_triple(question: str) -> Tuple[str, str, str]:
         '比较': r'比较|对比|异同',
         '论述': r'论述|谈谈|简要说明',
     }
-    q_type = ''
-    for t, pat in question_types.items():
-        if re.search(pat, question):
-            q_type = t
-            break
+    q_types = [t for t, pat in question_types.items() if re.search(pat, question)]
+    # 过滤纯题型标记'论述'（若已识别出其他具体设问类型，则不单列它）
+    if '论述' in q_types and len(q_types) > 1:
+        q_types = [t for t in q_types if t != '论述']
 
-    return time_range, obj, q_type
+    return time_range, obj, q_types
 
 
 def is_same_question(q1: str, q2: str) -> bool:
@@ -191,24 +193,23 @@ def parse_pass_output(text: str) -> List[Dict[str, Any]]:
 # ==================== 多数合并 ====================
 
 def semantic_equal(name1: str, name2: str) -> bool:
-    """判断两个知识点/板块名称是否语义相同"""
-    # 标准化：去标点空格
+    """判断两个知识点/板块名称是否语义相同（保守策略：宁可漏合并，不可误合并）。
+
+    实测教训：bigram 重叠≥2 会把「中央集权官僚体制的建立」与「巩固天皇权威，
+    强化中央集权」误判为同一点（三者共享"中央/央集/集权"三个 bigram），
+    导致 merge 时静默删除一个踩分点。故仅保留高置信度的完全相同与子串包含。
+    """
     n1 = re.sub(r'[，、：：（）\(\)·\s]', '', name1)
     n2 = re.sub(r'[，、：：（）\(\)·\s]', '', name2)
+    if not n1 or not n2:
+        return False
     # 完全相同
     if n1 == n2:
         return True
-    # 包含关系（短的是长的子串，且短串长度≥4）
-    if len(n1) >= 4 and n1 in n2:
-        return True
-    if len(n2) >= 4 and n2 in n1:
-        return True
-    # 双字滑动窗口重叠：提取2字符连续子串，重叠≥2个
-    def bigrams(s):
-        return set(s[i:i+2] for i in range(len(s)-1))
-    bg1, bg2 = bigrams(n1), bigrams(n2)
-    overlap = bg1 & bg2
-    if len(overlap) >= 2:
+    # 子串包含：短串是长串的一部分，且短串足够长、长度比足够高，
+    # 避免"中央"误匹配"中央集权"、"集权"误匹配"中央集权"
+    short, long = (n1, n2) if len(n1) <= len(n2) else (n2, n1)
+    if len(short) >= 4 and len(short) / len(long) >= 0.6 and short in long:
         return True
     return False
 
@@ -354,70 +355,30 @@ def merge_and_output(question: str, passes: List[List[Dict]]) -> Dict[str, Any]:
 
 
 def main():
-    """命令行入口：用于测试"""
+    """命令行入口：题目解析演示 + 三遍草稿合并（需注入 llm_func）
+
+    注意：自动三遍生成需外部注入 llm_func（签名 llm_func(prompt)->str）。
+    未注入时 generate_three_passes 返回空列表，本函数仅做题目三元组解析，
+    不再输出硬编码的 mock 数据。
+    """
     if len(sys.argv) < 2:
         print("用法: python generate_answer.py <question>")
         print("示例: python generate_answer.py \"论述西汉诸侯王国问题\"")
         sys.exit(1)
 
     question = sys.argv[1]
+    print("题目:", question)
+    triple = extract_question_triple(question)
+    print("三元组(时间/对象/设问类型):", triple)
 
-    # 测试：模拟三遍输出
-    mock_passes = [
-        [
-            {'name': '问题形成', 'max_score': 7, 'points': [
-                {'name': '历史沿袭与东西异制', 'score': 2},
-                {'name': '吸取秦亡教训分封同姓', 'score': 2},
-                {'name': '郡国并行导致王国坐大', 'score': 3},
-            ]},
-            {'name': '问题解决', 'max_score': 15, 'points': [
-                {'name': '汉高祖剪除异姓王', 'score': 3},
-                {'name': '汉文帝众建诸侯削藩', 'score': 4},
-                {'name': '汉景帝平定七国之乱', 'score': 4},
-                {'name': '汉武帝推恩令彻底解决', 'score': 4},
-            ]},
-            {'name': '历史影响', 'max_score': 8, 'points': [
-                {'name': '积极影响加强中央集权', 'score': 5},
-                {'name': '消极影响过度集权隐患', 'score': 3},
-            ]},
-        ],
-        [
-            {'name': '诸侯王国问题的形成', 'max_score': 7, 'points': [
-                {'name': '历史沿袭与东西异制', 'score': 2},
-                {'name': '吸取秦亡教训与分封同姓', 'score': 2},
-                {'name': '郡国并行致王国坐大', 'score': 3},
-            ]},
-            {'name': '诸侯王国问题的解决', 'max_score': 16, 'points': [
-                {'name': '汉高祖剪除异姓王', 'score': 3},
-                {'name': '汉文帝众建诸侯削藩', 'score': 4},
-                {'name': '汉景帝平定七国之乱', 'score': 4},
-                {'name': '汉武帝推恩令解决', 'score': 5},
-            ]},
-            {'name': '历史影响', 'max_score': 7, 'points': [
-                {'name': '加强中央集权巩固统一', 'score': 4},
-                {'name': '过度集权的隐患', 'score': 3},
-            ]},
-        ],
-        [
-            {'name': '问题的产生', 'max_score': 7, 'points': [
-                {'name': '历史沿袭与东西异制', 'score': 2},
-                {'name': '吸取秦亡教训分封同姓', 'score': 2},
-                {'name': '郡国并行导致王国坐大', 'score': 3},
-            ]},
-            {'name': '问题的解决', 'max_score': 15, 'points': [
-                {'name': '汉高祖剪除异姓王', 'score': 3},
-                {'name': '汉文帝众建诸侯削藩', 'score': 4},
-                {'name': '汉景帝平定七国之乱', 'score': 4},
-                {'name': '汉武帝推恩令彻底解决', 'score': 4},
-            ]},
-            {'name': '历史影响', 'max_score': 8, 'points': [
-                {'name': '积极影响：加强中央集权', 'score': 5},
-                {'name': '消极影响：过度集权隐患', 'score': 3},
-            ]},
-        ],
-    ]
+    # 三遍自动生成需注入 llm_func；未注入时仅做题目解析演示
+    passes = generate_three_passes(question)  # llm_func=None -> []
+    if not passes:
+        print("提示: 未注入 llm_func，跳过三遍自动生成。")
+        print("三遍草稿请由 AI 在 SKILL.md 规范下手动生成，并写入 three_passes 字段。")
+        return
 
-    result = merge_and_output(question, mock_passes)
+    result = merge_and_output(question, passes)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

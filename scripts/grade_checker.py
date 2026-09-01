@@ -75,44 +75,93 @@ class GradeChecker:
 
     # ==================== 三遍生成校验（新增·2026-08-31）====================
     def check_three_passes(self, grading_data):
-        """检查三遍生成记录：是否有 three_passes 字段，板块数是否一致"""
+        """检查三遍生成记录：three_passes 字段 + 共识实质校验。
+
+        规范要求三遍独立生成、多数合并（同知识点出现≥2遍才保留）。
+        本函数校验：
+          ① 字段存在（缺失→warning，不阻断）
+          ② 遍数（规范三遍；仅2遍→warning降级；<2遍→error）
+          ③ 每遍板块数与最终 sections 一致
+          ④ 共识实质：每个最终踩分点须在≥2遍草稿中找到出处
+             （按板块位置对齐，用 generate_answer.semantic_equal 匹配）
+        """
+        import os
+        import sys
+        _dir = os.path.dirname(os.path.abspath(__file__))
+        if _dir not in sys.path:
+            sys.path.insert(0, _dir)
+        try:
+            from generate_answer import semantic_equal
+        except Exception:
+            semantic_equal = None
+
         three_passes = grading_data.get('three_passes', None)
         sections = grading_data.get('sections', [])
 
         if not three_passes:
             self.warnings.append(
                 "未检测到 three_passes 字段——三遍生成记录缺失，"
-                "参考答案可能为单遍心证，方差风险较高。"
-                "建议使用 generate_answer.py 执行三遍独立生成+多数合并。"
+                "参考答案可能为单遍心证，方差风险较高。建议补录三遍草稿骨架。"
             )
             return
 
-        if not isinstance(three_passes, list) or len(three_passes) < 2:
-            self.errors.append(
-                f"three_passes 字段格式错误：应为≥2遍的列表，当前为 {type(three_passes).__name__}"
-            )
+        if not isinstance(three_passes, list):
+            self.errors.append("three_passes 字段格式错误：应为列表")
             return
 
-        # 检查每遍的板块数是否与最终 sections 一致
+        if len(three_passes) < 3:
+            if len(three_passes) == 2:
+                self.warnings.append("three_passes 仅有2遍（规范要求三遍），共识可靠性下降")
+            else:
+                self.errors.append(f"three_passes 应有3遍，实际{len(three_passes)}遍")
+                return
+
         n_expected = len(sections)
+
+        # 板块数一致性
         for pi, passage in enumerate(three_passes):
             if not isinstance(passage, list):
-                self.errors.append(f"three_passes[{pi}] 应为列表（板块列表）")
+                self.errors.append(f"three_passes[{pi}] 应为板块列表")
                 continue
-            n_actual = len(passage)
-            if n_actual != n_expected:
+            if n_expected > 0 and len(passage) != n_expected:
                 self.warnings.append(
-                    f"three_passes[{pi}] 板块数({n_actual})与最终sections板块数({n_expected})不一致"
+                    f"three_passes[{pi}] 板块数({len(passage)})与最终sections板块数({n_expected})不一致"
                 )
 
-        # 检查共识率：每个板块至少在其中2遍中出现
-        if n_expected > 0:
-            for si in range(n_expected):
-                hit_count = sum(1 for p in three_passes if si < len(p))
-                if hit_count < 2:
-                    self.warnings.append(
-                        f"three_passes 中板块{si+1}仅在{hit_count}遍中出现（需≥2遍共识）"
-                    )
+        # 共识实质校验：每个最终踩分点须在≥2遍草稿中找到出处
+        if semantic_equal and n_expected > 0:
+            for si, sec in enumerate(sections):
+                final_points = sec.get('points', [])
+                for fp in final_points:
+                    # 最终踩分点：7元素数组时 name 在 [0]；dict 时用 name 键
+                    if isinstance(fp, (list, tuple)):
+                        fp_name = fp[0] if len(fp) > 0 else ''
+                    elif isinstance(fp, dict):
+                        fp_name = fp.get('name', '')
+                    else:
+                        fp_name = str(fp)
+                    if not fp_name:
+                        continue
+                    match_count = 0
+                    for passage in three_passes:
+                        if si < len(passage):
+                            draft_sec = passage[si]
+                            draft_points = draft_sec.get('points', []) if isinstance(draft_sec, dict) else []
+                            for dp in draft_points:
+                                if isinstance(dp, (list, tuple)):
+                                    dp_name = dp[0] if len(dp) > 0 else ''
+                                elif isinstance(dp, dict):
+                                    dp_name = dp.get('name', '')
+                                else:
+                                    dp_name = str(dp)
+                                if dp_name and semantic_equal(fp_name, dp_name):
+                                    match_count += 1
+                                    break
+                    if match_count < 2:
+                        self.warnings.append(
+                            f"踩分点「{fp_name}」仅在{match_count}遍草稿中出现（共识要求≥2遍），"
+                            "可能被单遍幻觉引入，建议复核或补充草稿"
+                        )
 
     # ==================== 新增：单板块≤18 与 L1参考答案分值校验（2026-08-31）====================
     def check_section_cap(self, sections):
