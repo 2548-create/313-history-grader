@@ -5,10 +5,68 @@ essay-grader: 生成313历史学论述题批改Word报告
 """
 import os
 import re
+import sys
+import json
+import argparse
+from datetime import datetime
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+
+
+# ==================== 路径与配置 ====================
+# skill 根目录：scripts/generate_word.py 的上级目录（不依赖运行时 CWD）
+SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_OUTPUT_DIR = os.path.join(SKILL_ROOT, "outputs")
+CONFIG_PATH = os.path.join(SKILL_ROOT, "config.json")
+CONFIG_EXAMPLE_PATH = os.path.join(SKILL_ROOT, "config.example.json")
+
+
+def _sanitize_filename(s, max_len=20):
+    """清洗字符串为安全的文件名片段（去非法字符、空白转下划线、截断）"""
+    s = re.sub(r'[\\/:*?"<>|\r\n\t]+', '', str(s)).strip()
+    s = re.sub(r'\s+', '_', s)
+    return s[:max_len]
+
+
+def load_config():
+    """读取配置：config.example.json 作默认模板，config.json 作用户覆盖（均不存在则回退内置默认）"""
+    cfg = {"output_dir": "", "filename_template": "{topic}_{timestamp}.docx"}
+    for p in (CONFIG_EXAMPLE_PATH, CONFIG_PATH):
+        if os.path.exists(p):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    cfg.update(json.load(f))
+            except Exception:
+                pass
+    return cfg
+
+
+def resolve_output_path(input_json_path, config, cli_output=None):
+    """解析最终输出路径。优先级：cli_output > config.output_dir > 默认(skill/outputs/)。
+    - cli_output：相对 CWD（用户直觉）
+    - config.output_dir：相对路径以 skill 根为基准解析
+    返回绝对路径。"""
+    if cli_output:
+        return os.path.abspath(cli_output)
+    out_dir = DEFAULT_OUTPUT_DIR
+    cfg_dir = (config.get("output_dir") or "").strip()
+    if cfg_dir:
+        out_dir = cfg_dir if os.path.isabs(cfg_dir) else os.path.join(SKILL_ROOT, cfg_dir)
+    template = config.get("filename_template") or "{topic}_{timestamp}.docx"
+    topic = ""
+    try:
+        with open(input_json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        topic = _sanitize_filename(data.get("question", ""), 20)
+    except Exception:
+        pass
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = template.format(topic=topic or "批改报告", timestamp=ts)
+    if not fname.lower().endswith(".docx"):
+        fname += ".docx"
+    return os.path.join(out_dir, fname)
 
 
 # ==================== AI腔检测 ====================
@@ -453,11 +511,34 @@ class EssayGrader:
             run.font.size = Pt(8)
             run.font.color.rgb = RGBColor(128, 128, 128)
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        d = os.path.dirname(output_path)
+        if d:
+            os.makedirs(d, exist_ok=True)
         doc.save(output_path)
         print(f"Word已生成: {output_path}")
         return output_path
 
 
 if __name__ == "__main__":
-    print("essay-grader脚本已就绪")
+    parser = argparse.ArgumentParser(description="生成313历史学论述题批改Word报告")
+    parser.add_argument("input", help="批改数据 JSON 路径")
+    parser.add_argument("-o", "--output", help="输出 docx 路径（绝对或相对CWD，优先级最高）")
+    parser.add_argument("--config", help="自定义 config.json 路径（默认读 skill 根/config.json）")
+    args = parser.parse_args()
+
+    config = load_config()
+    if args.config:
+        cfg_path = os.path.abspath(os.path.expanduser(args.config))
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    config.update(json.load(f))
+            except Exception:
+                pass
+
+    output_path = resolve_output_path(args.input, config, args.output)
+    with open(args.input, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    gen = EssayGrader()
+    gen.set_grading_result(data)
+    gen.generate_word_report(output_path)

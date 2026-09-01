@@ -22,6 +22,9 @@ grading_data_*.json
 # User metadata
 _user_meta.json
 
+# User config (自定义输出路径，不入库；参考 config.example.json)
+config.json
+
 # OS
 .DS_Store
 Thumbs.db

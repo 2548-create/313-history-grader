@@ -1,0 +1,4 @@
+{
+  "output_dir": "",
+  "filename_template": "{topic}_{timestamp}.docx"
+}

@@ -688,6 +688,97 @@ L4总分          = L3要点学生分 + language_score + 卷面
 **【脚本实现】** `generate_word_report()`
 **【自检器检查】** 全局自检C项完整（分数一致性）
 
+### 输出路径配置（可配置 · 2026-09-01 新增）
+
+报告默认保存在 **skill 目录内的 `outputs/`**（以 skill 根为基准，不依赖运行时的当前工作目录 CWD），保证分享给他人后落点稳定可预期。
+
+**自定义保存位置（两种方式，可叠加）：**
+- **持久配置**：编辑 skill 根目录的 `config.json`（可参考 `config.example.json`），设 `"output_dir"`：
+  - 留空 `""` → 用默认 `skill/outputs/`
+  - 填绝对路径 → 固定存该目录
+  - 填相对路径 → 以 skill 根为基准解析（如 `"../reports"`）
+  - 文件名由 `"filename_template"` 控制（默认 `{topic}_{timestamp}.docx`，`{topic}` 取题目清洗后前20字）
+- **单次覆盖**：命令行用 `-o/--output` 指定完整路径（绝对或相对 CWD，优先级最高）
+
+**命令行用法：**
+```
+python scripts/generate_word.py <输入.json> [-o 输出.docx] [--config 自定义config.json]
+```
+
+**优先级链**：`CLI -o` > `config.json.output_dir` > 默认 `skill/outputs/`
+
+> **【强制】生成完成后必须告知用户路径**：Word 报告生成后，AI **必须在给用户的回复中用自然语言明确写出报告的完整保存路径**（例如「报告已保存到：`C:\Users\某\.workbuddy\skills\essay-grader\outputs\题目名_时间戳.docx`」）。脚本虽会在控制台打印路径，但控制台输出用户未必会看；必须转述到对话里，否则用户找不到文件。路径取脚本实际落盘的真实物理路径（junction 入口与真源路径指向同一文件，写任一个即可，但推荐写用户实际使用的入口路径）。
+
+---
+
+## JSON 数据契约（必读 · 生成层与验证层/执行层一致）
+
+> `grade_checker.py`（验证层）与 `generate_word.py`（执行层）**都按以下格式消费数据**。AI 在生成批改 JSON 时必须严格遵循，否则校验器报错或渲染错乱。这是三位一体的规范层约束——务必钉死，不要靠记忆。
+
+**顶层字段：**
+```json
+{
+  "question": "题目文本",
+  "student_answer": "学生答案（可含 \\n\\n 分段；史实硬伤由 red_keywords 标红）",
+  "reference": "参考答案（≥1000字，无AI腔，首末段缩进两格）",
+  "sections": [ "板块对象，见下" ],
+  "language_breakdown": { "六维度论述组织评分，见下" },
+  "language_score": 10.0,
+  "points_score": 30.0,
+  "diagnosis": "整体点评文本（必须是字符串，不是字典）",
+  "issues": [ {"type":"亮点","problem":"..."}, {"type":"不足","problem":"...","fix":"正确表述"} ],
+  "suggestions": [ {"type":"改进方向","problem":"..."} ],
+  "red_keywords": [ ["错误词","正确词"] ],
+  "three_passes": [ "三遍生成记录，可选" ]
+}
+```
+- `language_score` = `language_breakdown` 六维 `score` 之和（满分10）；`points_score` = 各 `section.score` 之和（满分30）。二者校验器会核对，缺失按 0 算并报错。
+- `issues` 推荐提供（含至少一个 `type:"亮点"`），否则校验器提示"亮点为空"。`suggestions` / `red_keywords` / `three_passes` 可选。
+
+**板块（sections 元素）：**
+```json
+{
+  "name": "政治制度的延续与发展",
+  "max_score": 14,   // 板块满分（≤18，所有板块之和须=30）
+  "score": 9.5,      // 板块学生得分（= 其下 points 各 [5] 之和）
+  "points": [ "7元素数组，见下" ]
+}
+```
+
+**踩分点（points 元素 = 7 元素数组，顺序不可乱）：**
+```
+[ 名称, 关键词, 学生作答, 满分, 维度, 得分, 点评 ]
+  [0] 名称      string  踩分点具体名称（禁止只写"核心/重要"等标签，空名报错）
+  [1] 关键词    string  逗号分隔的关键术语
+  [2] 学生作答  string  与踩分点直接相关的核心句摘录（≤120字，无引导语/引号，未涉及写"无"）
+  [3] 满分      number  该点满分（须为 0.5 倍数）
+  [4] 维度      string  具体分析维度（禁止用板块名如"背景/措施/影响"；无则写"—"）
+  [5] 得分      number  学生得分（须为 0.5 倍数，且 ≤ [3] 满分）
+  [6] 点评      string  自然语言一段话；含"答出/问题/扣分/正确表述"要素；禁【】标签与内部评级词
+```
+
+**language_breakdown（六维度，每维 = `{score, reason}`）：**
+```json
+{
+  "structure":    {"score": 1.5, "reason": "整体结构评语（≥12字，引用学生证据）"},  // 满分2
+  "logic":        {"score": 1.5, "reason": "..."},  // 满分2
+  "argument":     {"score": 1.0, "reason": "..."},  // 满分2
+  "language":     {"score": 0.5, "reason": "..."},  // 满分1
+  "history_view": {"score": 0.5, "reason": "..."},  // 满分1
+  "neatness":     {"score": 1.5, "reason": "..."}   // 满分2（卷面整洁）
+}
+```
+六维 `score` 之和须 = `language_score`（满分10）；`reason` 须为 ≥12 字自然语言评语，引用学生具体句子/术语。
+
+**diagnosis（字符串，整体点评）：** 须同时含七要素——类卷（一二三类）、`X/40` 分数、要点踩分、组织论述、亮点、不足、提分空间；禁止 `属X类卷（...）` 括号内嵌理由写法。其中 `X/40` 必须等于 `points_score + language_score`。
+
+**一致性硬约束（校验器拦截）：**
+- 所有板块 `max_score` 之和 = 30；单板块 `max_score` ≤ 18
+- 每板块 `score` = 其下 points 各 `[5]` 之和
+- `points_score` = 各板块 `score` 之和；`language_score` = 六维 `score` 之和
+- `points_score + language_score` ≤ 40，且 = `diagnosis` 中的 `X/40`
+- 每踩分点 `[5]` 是 0.5 倍数且 ≤ `[3]`（满分）
+
 ---
 
 ## 生成前全局自检清单
