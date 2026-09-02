@@ -1,6 +1,20 @@
-# essay-grader · 313 历史学论述题批改 skill
+# essay-grader · 313 历史学论述题自动批改 skill
 
-自动批改 313 历史学统考论述题：生成参考答案与踩分点 → OCR 识别学生答案 → 逐点评分 → 输出 Word 学生反馈报告。
+> 自动批改 313 历史学统考**论述题**：独立生成参考答案与踩分点 → OCR 识别学生手写/粘贴答案 → 逐点评分 → 输出 Word 学生反馈报告（含得分概览、逐点点评、六维论述评语、整体诊断）。
+>
+> 一句话：把一道论述题的题面 + 学生答案丢给 agent，它按 `SKILL.md` 走完整七步流程，最后给你一份可直接打印/发还的 Word 批改报告。
+
+## 一行命令安装（公开仓库 v1.0.0）
+
+```bash
+# Windows
+git clone --branch v1.0.0 https://github.com/2548-create/313-history-grader.git %USERPROFILE%\.workbuddy\skills\essay-grader
+
+# macOS / Linux
+git clone --branch v1.0.0 https://github.com/2548-create/313-history-grader.git ~/.workbuddy/skills/essay-grader
+```
+
+装完后**重启 agent 会话**，技能列表即出现 `essay-grader`，所有项目通用。（也支持 Claude Code `~/.claude/skills/`、Codex `~/.codex/skills/` 等目录，把目录名保持为 `essay-grader` 即可。）
 
 ## 依赖（AI 自动处理，用户无需关心）
 - Python 3.10+（agent 的托管/隔离 Python 即满足）
